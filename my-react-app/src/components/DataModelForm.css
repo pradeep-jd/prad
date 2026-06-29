@@ -1,0 +1,150 @@
+/* Page */
+.page-container {
+  padding: 30px;
+  background: #f5f7fb;
+  min-height: 100vh;
+  font-family: Arial, sans-serif;
+}
+
+/* Card */
+.card {
+  background: white;
+  border-radius: 20px;
+  padding: 25px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  margin-bottom: 25px;
+}
+
+/* Header */
+.page-title {
+  font-size: 42px;
+  font-weight: bold;
+  color: #182848;
+}
+
+.subtitle {
+  color: #667085;
+  margin-top: 8px;
+}
+
+/* Action buttons row */
+.button-row {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+.btn {
+  border: none;
+  padding: 14px 22px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+}
+
+.btn-purple {
+  background: linear-gradient(90deg, #6d5dfc, #4f46e5);
+  color: white;
+}
+
+.btn-blue {
+  background: #2563eb;
+  color: white;
+}
+
+.btn-red {
+  background: white;
+  border: 2px solid #ef4444;
+  color: #ef4444;
+}
+
+.btn-green {
+  background: #22c55e;
+  color: white;
+}
+
+.btn-outline {
+  background: white;
+  border: 2px solid #14b8a6;
+  color: #14b8a6;
+}
+
+/* Table */
+.table-wrapper {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: 15px;
+  overflow: hidden;
+}
+
+th {
+  background: #f1f5f9;
+  padding: 18px;
+  text-align: center;
+}
+
+td {
+  padding: 15px;
+  text-align: center;
+  border-top: 1px solid #eee;
+}
+
+input,
+select {
+  width: 90%;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  outline: none;
+}
+
+/* Status badges */
+.success {
+  background: #dcfce7;
+  color: #16a34a;
+  padding: 8px 14px;
+  border-radius: 20px;
+  font-weight: bold;
+}
+
+.failed {
+  background: #fee2e2;
+  color: #dc2626;
+  padding: 8px 14px;
+  border-radius: 20px;
+  font-weight: bold;
+}
+
+/* Bottom layout */
+.bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+@media(max-width:900px){
+  .bottom-grid{
+    grid-template-columns:1fr;
+  }
+}
+
+/* SQL Preview */
+.sql-box {
+  background: #111827;
+  color: #34d399;
+  border-radius: 16px;
+  padding: 25px;
+  font-family: monospace;
+  overflow-x: auto;
+}
