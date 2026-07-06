@@ -9,12 +9,13 @@ app.use(cors());
 app.use(express.json());
 
 // PostgreSQL connection
+const { Pool } = require("pg");
+
 const pool = new Pool({
-  user: "postgres",
-  host: "localhost",
-  database: "postgres",
-  password: "postgres123", // change if yours is different
-  port: 5432,
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 
 // Apply Template API
