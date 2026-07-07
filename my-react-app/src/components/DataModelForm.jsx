@@ -313,7 +313,7 @@ function DataModelForm() {
       return;
     }
     try {
-      const response = await fetch("http://localhost:5000/apply-template", {
+      const response = await fetch("https://prad-proj1.onrender.com/apply-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template: previewData }),
@@ -333,7 +333,7 @@ function DataModelForm() {
   // ── Load schema ─────────────────────────────────────────────────────────────
   const loadSchema = async () => {
     try {
-      const response = await fetch("http://localhost:5000/schema");
+      const response = await fetch("https://prad-proj1.onrender.com/schema");
       const data = await response.json();
       setSchemaData(data);
     } catch (err) {
