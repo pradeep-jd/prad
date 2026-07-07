@@ -498,7 +498,7 @@ function DataModelFormNew() {
 
     try {
       showToast("Applying approved schema changes to PostgreSQL database...", "info");
-      const response = await fetch("http://localhost:5000/apply-template", {
+      const response = await fetch("https://prad-proj1.onrender.com/apply-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template }),
