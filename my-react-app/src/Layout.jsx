@@ -20,6 +20,9 @@ function Layout({ onLogout }) {
   const [showNotif, setShowNotif] = useState(false);
   const [pendingTables, setPendingTables] = useState([]);
   const [pendingSubmissions, setPendingSubmissions] = useState([]);
+  const [previousTables, setPreviousTables] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     const load = () => {
@@ -34,6 +37,36 @@ function Layout({ onLogout }) {
       setPendingTables(pendTables);
       setPendingSubmissions(pendSubs);
       setPendingCount(pendTables.length + pendSubs.length);
+
+      const names = new Set();
+      const list = [];
+
+      const defaults = [
+        { name: "XBITbls.RptSvcUnitMthSellin", id: "default1", type: "default" },
+        { name: "XDW.SampleTable", id: "default2", type: "default" }
+      ];
+      defaults.forEach(d => {
+        names.add(d.name.toLowerCase());
+        list.push(d);
+      });
+
+      tables.forEach(t => {
+        const name = t.tableName || t.name;
+        if (name && !names.has(name.toLowerCase())) {
+          names.add(name.toLowerCase());
+          list.push({ name, id: t.id || `table-${name}`, type: "table" });
+        }
+      });
+
+      subs.forEach(s => {
+        const name = s.tableName;
+        if (name && !names.has(name.toLowerCase())) {
+          names.add(name.toLowerCase());
+          list.push({ name, id: s.id, type: "submission" });
+        }
+      });
+
+      setPreviousTables(list);
     };
 
     load();
@@ -44,6 +77,16 @@ function Layout({ onLogout }) {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
+
+  const handleSelectTable = (table) => {
+    setSearchTerm(table.name);
+    setIsOpen(false);
+    if (table.type === "submission") {
+      navigate(`/datamodelnew?submissionId=${table.id}`);
+    } else {
+      navigate(`/datamodelnew?tableName=${encodeURIComponent(table.name)}`);
+    }
+  };
 
   const userRole = localStorage.getItem("userRole") || "Unknown";
   const isArchitect = userRole === "architect";
@@ -516,13 +559,73 @@ function Layout({ onLogout }) {
 
   <p style={styles.orText}>(And/Or)</p>
 
-  <select
-    style={styles.dropdown}
-    defaultValue="XBITbls.RptSvcUnitMthSellin"
-  >
-    <option>XBITbls.RptSvcUnitMthSellin</option>
-    <option>XDW.SampleTable</option>
-  </select>
+  <div style={{ position: "relative", width: "320px" }}>
+    <input
+      type="text"
+      placeholder="Search previous tables..."
+      value={searchTerm}
+      onChange={(e) => {
+        setSearchTerm(e.target.value);
+        setIsOpen(true);
+      }}
+      onFocus={() => setIsOpen(true)}
+      onBlur={() => {
+        setTimeout(() => setIsOpen(false), 200);
+      }}
+      style={{
+        ...styles.dropdown,
+        width: "100%",
+        boxSizing: "border-box",
+      }}
+    />
+
+    {isOpen && (
+      <ul style={{
+        position: "absolute",
+        top: "100%",
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+        margin: "4px 0 0 0",
+        padding: "4px 0",
+        listStyle: "none",
+        background: mode === 'light' ? "#ffffff" : "#1e293b",
+        border: `1px solid ${muiTheme.palette.divider}`,
+        borderRadius: "8px",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+        maxHeight: "200px",
+        overflowY: "auto"
+      }}>
+        {previousTables
+          .filter(t => t.name.toLowerCase().includes(searchTerm.toLowerCase()))
+          .map((table) => (
+            <li
+              key={table.id}
+              onClick={() => handleSelectTable(table)}
+              style={{
+                padding: "8px 12px",
+                cursor: "pointer",
+                fontSize: "13px",
+                color: muiTheme.palette.text.primary,
+                transition: "background 0.2s",
+                borderBottom: `1px solid ${muiTheme.palette.divider}`,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = mode === 'light' ? "#f1f5f9" : "#334155";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <div style={{ fontWeight: "600" }}>{table.name}</div>
+              <div style={{ fontSize: "11px", color: muiTheme.palette.text.secondary, textTransform: "capitalize" }}>
+                {table.type === "submission" ? "Draft / Pending" : table.type === "table" ? "Approved Table" : "System Default"}
+              </div>
+            </li>
+          ))}
+      </ul>
+    )}
+  </div>
 
 </div>
 

@@ -35,6 +35,20 @@ const accent = {
   amber: "#f59e0b",
 };
 
+const standardDataTypes = [
+  "VARCHAR(255)",
+  "VARCHAR(50)",
+  "VARCHAR(100)",
+  "VARCHAR(MAX)",
+  "INTEGER",
+  "BIGINT",
+  "NUMERIC(18,2)",
+  "BOOLEAN",
+  "DATE",
+  "TIMESTAMP",
+  "TEXT"
+];
+
 function Btn({ children, onClick, disabled, variant = "default", style: extra }) {
   const base = {
     padding: "8px 16px",
@@ -81,6 +95,7 @@ function DataModelFormNew() {
   // URL search params for routing / notifications
   const [searchParams, setSearchParams] = useSearchParams();
   const querySubmissionId = searchParams.get("submissionId");
+  const queryTableName = searchParams.get("tableName");
 
   const [pendingSubmissions, setPendingSubmissions] = useState([]);
   const [selectedSubmissionId, setSelectedSubmissionId] = useState("");
@@ -196,10 +211,32 @@ function DataModelFormNew() {
     }
   }, [querySubmissionId]);
 
+  // Handle URL query parameter ?tableName=xxx
+  useEffect(() => {
+    if (queryTableName) {
+      setTableData(prev => ({ ...prev, tableName: queryTableName }));
+    }
+  }, [queryTableName]);
+
   // AUTO-LOAD: Watch Table Name field and load drafts/approved schemas dynamically
   useEffect(() => {
     const name = tableData.tableName ? tableData.tableName.trim() : "";
     if (!name || name === lastLoadedTableRef.current) return;
+
+    // 0. Look for pending submission in schemaSubmissions first (contains architect's edits)
+    const subs = JSON.parse(localStorage.getItem("schemaSubmissions") || "[]");
+    const pendingSub = subs.find(s => s.tableName.toLowerCase() === name.toLowerCase() && s.status === "pending");
+    if (pendingSub) {
+      isStateLoadingRef.current = true;
+      setSelectedSubmissionId(pendingSub.id);
+      setTableData({ ...pendingSub.tableData, tableName: tableData.tableName });
+      if (pendingSub.dataProductData) setDataProductData(pendingSub.dataProductData);
+      if (pendingSub.columns) setColumns(pendingSub.columns);
+      lastLoadedTableRef.current = name;
+      showToast(`Loaded pending submission for table "${name}"`);
+      setTimeout(() => { isStateLoadingRef.current = false; }, 100);
+      return;
+    }
 
     // 1. Look for draft first
     const savedDraft = localStorage.getItem(`schemaDrafts_${name}`);
@@ -250,25 +287,90 @@ function DataModelFormNew() {
     }
   }, [tableData, dataProductData, columns, isArchitect]);
 
+  // REAL-TIME SYNC: Listen to storage events to reload pending submission when updated by Architect
+  useEffect(() => {
+    if (isArchitect) return;
+
+    const handleStorageChange = () => {
+      const name = tableData.tableName ? tableData.tableName.trim() : "";
+      if (!name) return;
+
+      const subs = JSON.parse(localStorage.getItem("schemaSubmissions") || "[]");
+      const currentSub = selectedSubmissionId 
+        ? subs.find(s => s.id === selectedSubmissionId)
+        : subs.find(s => s.tableName.toLowerCase() === name.toLowerCase() && s.status === "pending");
+
+      if (currentSub && currentSub.status === "pending") {
+        const isDifferent =
+          JSON.stringify(currentSub.tableData) !== JSON.stringify(tableData) ||
+          JSON.stringify(currentSub.dataProductData) !== JSON.stringify(dataProductData) ||
+          JSON.stringify(currentSub.columns) !== JSON.stringify(columns);
+
+        if (isDifferent) {
+          isStateLoadingRef.current = true;
+          setTableData(currentSub.tableData);
+          if (currentSub.dataProductData) setDataProductData(currentSub.dataProductData);
+          if (currentSub.columns) setColumns(currentSub.columns);
+          if (!selectedSubmissionId) setSelectedSubmissionId(currentSub.id);
+          lastLoadedTableRef.current = currentSub.tableName;
+          showToast(`Developer view updated with Architect's latest edits for "${currentSub.tableName}"`, "info");
+          setTimeout(() => {
+            isStateLoadingRef.current = false;
+          }, 100);
+        }
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [tableData, dataProductData, columns, isArchitect, selectedSubmissionId]);
+
   // DDL generator
   useEffect(() => {
     if (tableData.tableName && columns.length > 0) {
-      let sql = `CREATE TABLE ${tableData.tableName} (\n`;
-      sql += columns.map((col) => {
-        let line = `  ${col.columnName || 'col'} ${col.dataType || 'VARCHAR(255)'}`;
-        if (col.isNotNull === 'Y') line += ' NOT NULL';
-        if (col.primaryIndex === 'Y') line += ' PRIMARY KEY';
-        return line;
-      }).join(',\n');
-      sql += '\n);';
-      setSqlPreview(sql);
+      const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
+      const isExisting = approvedTables.some(t => {
+        const name = t.tableName || t.name;
+        return name && name.trim().toLowerCase() === tableData.tableName.trim().toLowerCase();
+      });
+
+      if (isExisting) {
+        const addedCols = columns.filter(col => col.action === "Add" && col.columnName);
+        if (addedCols.length > 0) {
+          const sql = addedCols.map(col => {
+            let line = `ALTER TABLE ${tableData.tableName} ADD COLUMN ${col.columnName} ${col.dataType || 'VARCHAR(255)'}`;
+            if (col.isNotNull === 'Y') line += ' NOT NULL';
+            if (col.primaryIndex === 'Y') line += ' PRIMARY KEY';
+            return line + ';';
+          }).join('\n');
+          setSqlPreview(sql);
+        } else {
+          setSqlPreview("-- No new columns to add (select 'Add' as Action to add new columns)");
+        }
+      } else {
+        let sql = `CREATE TABLE ${tableData.tableName} (\n`;
+        sql += columns.map((col) => {
+          let line = `  ${col.columnName || 'col'} ${col.dataType || 'VARCHAR(255)'}`;
+          if (col.isNotNull === 'Y') line += ' NOT NULL';
+          if (col.primaryIndex === 'Y') line += ' PRIMARY KEY';
+          return line;
+        }).join(',\n');
+        sql += '\n);';
+        setSqlPreview(sql);
+      }
     } else {
       setSqlPreview("");
     }
   }, [tableData.tableName, columns]);
 
   const handleTableChange = (field, value) => {
-    setTableData(prev => ({ ...prev, [field]: value }));
+    setTableData(prev => {
+      const updated = { ...prev, [field]: value };
+      if (field === "tableName") {
+        updated.entityLogicalName = generateAttributeName(value);
+      }
+      return updated;
+    });
   };
 
   const handleProductChange = (field, value) => {
@@ -276,11 +378,16 @@ function DataModelFormNew() {
   };
 
   const handleAddColumn = () => {
+    const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
+    const isExisting = approvedTables.some(t => {
+      const name = t.tableName || t.name;
+      return name && name.trim().toLowerCase() === tableData.tableName.trim().toLowerCase();
+    });
+
     const newColumn = {
       attributeName: "",
-      reverseGenerateLogicalName: "",
       columnName: "",
-      action: "No Change",
+      action: isExisting ? "Add" : "No Change",
       dataDomain: "",
       dataClassification: "",
       dataType: "",
@@ -294,11 +401,16 @@ function DataModelFormNew() {
   };
 
   const handleAddColumns = (count) => {
+    const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
+    const isExisting = approvedTables.some(t => {
+      const name = t.tableName || t.name;
+      return name && name.trim().toLowerCase() === tableData.tableName.trim().toLowerCase();
+    });
+
     const newColumns = Array(count).fill(null).map(() => ({
       attributeName: "",
-      reverseGenerateLogicalName: "",
       columnName: "",
-      action: "No Change",
+      action: isExisting ? "Add" : "No Change",
       dataDomain: "",
       dataClassification: "",
       dataType: "",
@@ -382,7 +494,8 @@ function DataModelFormNew() {
       columns,
       status: "pending",
       submittedAt: new Date().toISOString(),
-      submittedBy: "Developer"
+      submittedBy: "Developer",
+      editedByArchitect: false
     };
 
     const existing = JSON.parse(localStorage.getItem("schemaSubmissions") || "[]");
@@ -406,12 +519,11 @@ function DataModelFormNew() {
     }
 
     const name = tableData.tableName.trim();
-    let csvContent = "Attribute Name,Reverse Generate Logical Name,Column Name,Action,Data Domain,Data Classification,Data Type,Is Not Null,Primary Index,Attribute Definition,Has Stats,Default Value\n";
+    let csvContent = "Attribute Name,Column Name,Action,Data Domain,Data Classification,Data Type,Is Not Null,Primary Index,Attribute Definition,Has Stats,Default Value\n";
 
     columns.forEach((col) => {
       const row = [
         col.attributeName || "",
-        col.reverseGenerateLogicalName || "",
         col.columnName || "",
         col.action || "No Change",
         col.dataDomain || "",
@@ -443,12 +555,19 @@ function DataModelFormNew() {
     const subs = JSON.parse(localStorage.getItem("schemaSubmissions") || "[]");
     const updated = subs.map(s => {
       if (s.id === selectedSubmissionId) {
+        const name = tableData.tableName.trim();
+        // Update/sync the developer draft with architect's current edits
+        const draft = { tableData, dataProductData, columns };
+        localStorage.setItem(`schemaDrafts_${name}`, JSON.stringify(draft));
+
         return {
           ...s,
-          tableName: tableData.tableName.trim(),
+          tableName: name,
           tableData,
           dataProductData,
-          columns
+          columns,
+          editedByArchitect: true,
+          architectLastEditedAt: new Date().toISOString()
         };
       }
       return s;
@@ -482,19 +601,37 @@ function DataModelFormNew() {
       return;
     }
 
-    const template = [
-      { action: "CREATE_TABLE", table_name: tableData.tableName }
-    ];
-    columns.forEach(col => {
-      if (col.columnName) {
-        template.push({
-          action: "ADD_COLUMN",
-          table_name: tableData.tableName,
-          column_name: col.columnName,
-          data_type: col.dataType || "VARCHAR(255)"
-        });
-      }
+    const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
+    const isExisting = approvedTables.some(t => {
+      const name = t.tableName || t.name;
+      return name && name.trim().toLowerCase() === tableData.tableName.trim().toLowerCase();
     });
+
+    const template = [];
+    if (!isExisting) {
+      template.push({ action: "CREATE_TABLE", table_name: tableData.tableName });
+      columns.forEach(col => {
+        if (col.columnName) {
+          template.push({
+            action: "ADD_COLUMN",
+            table_name: tableData.tableName,
+            column_name: col.columnName,
+            data_type: col.dataType || "VARCHAR(255)"
+          });
+        }
+      });
+    } else {
+      columns.forEach(col => {
+        if (col.columnName && col.action === "Add") {
+          template.push({
+            action: "ADD_COLUMN",
+            table_name: tableData.tableName,
+            column_name: col.columnName,
+            data_type: col.dataType || "VARCHAR(255)"
+          });
+        }
+      });
+    }
 
     try {
       showToast("Applying approved schema changes to PostgreSQL database...", "info");
@@ -538,6 +675,11 @@ function DataModelFormNew() {
       const filteredTables = tables.filter(t => t.tableName.toLowerCase() !== tableData.tableName.toLowerCase());
       localStorage.setItem("tables", JSON.stringify([...filteredTables, approvedTable]));
 
+      // Also update/sync the developer draft with the final approved/edited data!
+      const name = tableData.tableName.trim();
+      const draft = { tableData, dataProductData, columns };
+      localStorage.setItem(`schemaDrafts_${name}`, JSON.stringify(draft));
+
       window.dispatchEvent(new Event("storage"));
 
       setSearchParams({});
@@ -548,6 +690,20 @@ function DataModelFormNew() {
       showToast("Failed to apply changes. Is backend running?", "error");
     }
   };
+  const getIsEditedByArchitect = () => {
+    if (isArchitect) return false;
+    const name = tableData.tableName ? tableData.tableName.trim() : "";
+    if (!name) return false;
+    
+    const subs = JSON.parse(localStorage.getItem("schemaSubmissions") || "[]");
+    const currentSub = selectedSubmissionId 
+      ? subs.find(s => s.id === selectedSubmissionId)
+      : subs.find(s => s.tableName.toLowerCase() === name.toLowerCase() && s.status === "pending");
+      
+    return currentSub ? !!currentSub.editedByArchitect : false;
+  };
+  
+  const isEditedByArchitect = getIsEditedByArchitect();
 
   return (
     <div style={{ padding: "30px", backgroundColor: t.bg, color: t.text, minHeight: "100vh" }}>
@@ -630,6 +786,47 @@ function DataModelFormNew() {
         </div>
       )}
 
+      {/* Selector banner for Developer showing Architect edits */}
+      {!isArchitect && isEditedByArchitect && (
+        <div style={{
+          background: mode === 'dark' ? '#2e261f' : '#fef3c7',
+          borderRadius: "8px",
+          padding: "16px",
+          marginBottom: "20px",
+          border: `1px solid ${accent.amber}`,
+          display: "flex",
+          alignItems: "center",
+          gap: "15px",
+          justifyContent: "space-between",
+          color: mode === 'dark' ? '#fde68a' : '#92400e',
+          boxShadow: "0 2px 8px rgba(245, 158, 11, 0.15)"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "18px" }}>💡</span>
+            <div>
+              <span style={{ fontSize: "14px", fontWeight: "bold", display: "block" }}>
+                Architect Edits Applied
+              </span>
+              <span style={{ fontSize: "12px", opacity: 0.9 }}>
+                The Architect has reviewed and edited this schema. The changes are now visible below.
+              </span>
+            </div>
+          </div>
+          <div style={{ 
+            fontSize: "11px", 
+            background: accent.amber, 
+            color: "#000", 
+            padding: "4px 10px", 
+            borderRadius: "4px", 
+            fontWeight: "bold",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em"
+          }}>
+            Architect Reviewed
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ marginBottom: "24px", textAlign: "center" }}>
         <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700 }}>
@@ -707,11 +904,9 @@ function DataModelFormNew() {
             <label style={{ fontSize: "11px", fontWeight: 600, color: t.textMuted }}>
               Distribution Style
             </label>
-            <input
-              type="text"
+            <select
               value={tableData.distributionStyle}
               onChange={(e) => handleTableChange("distributionStyle", e.target.value)}
-              placeholder="Enter style"
               style={{
                 width: "100%",
                 padding: "6px 8px",
@@ -723,7 +918,13 @@ function DataModelFormNew() {
                 color: t.text,
                 boxSizing: "border-box",
               }}
-            />
+            >
+              <option value="">Select style</option>
+              <option value="AUTO">AUTO</option>
+              <option value="EVEN">EVEN</option>
+              <option value="KEY">KEY</option>
+              <option value="ALL">ALL</option>
+            </select>
           </div>
 
           <div style={{ marginBottom: "10px" }}>
@@ -919,7 +1120,6 @@ function DataModelFormNew() {
               <thead>
                 <tr style={{ background: mode === 'dark' ? "#2d3148" : "#f3f4f6", color: t.text }}>
                   <th style={{ padding: "8px", textAlign: "left", fontWeight: 700, borderRight: `1px solid ${t.border}` }}>Attribute Name</th>
-                  <th style={{ padding: "8px", textAlign: "left", fontWeight: 700, borderRight: `1px solid ${t.border}` }}>Reverse Generate Logical Name</th>
                   <th style={{ padding: "8px", textAlign: "left", fontWeight: 700, borderRight: `1px solid ${t.border}` }}>Column Name</th>
                   <th style={{ padding: "8px", textAlign: "left", fontWeight: 700, borderRight: `1px solid ${t.border}` }}>Action</th>
                   <th style={{ padding: "8px", textAlign: "left", fontWeight: 700, borderRight: `1px solid ${t.border}` }}>Data Domain</th>
@@ -942,15 +1142,6 @@ function DataModelFormNew() {
                         value={col.attributeName}
                         onChange={(e) => handleColumnChange(index, "attributeName", e.target.value)}
                         placeholder="Attr"
-                        style={{ width: "100%", padding: "4px", fontSize: "11px", border: `1px solid ${t.border}`, borderRadius: "3px", background: t.inputBg, color: t.text }}
-                      />
-                    </td>
-                    <td style={{ padding: "8px", borderRight: `1px solid ${t.border}` }}>
-                      <input
-                        type="text"
-                        value={col.reverseGenerateLogicalName}
-                        onChange={(e) => handleColumnChange(index, "reverseGenerateLogicalName", e.target.value)}
-                        placeholder="Reverse"
                         style={{ width: "100%", padding: "4px", fontSize: "11px", border: `1px solid ${t.border}`, borderRadius: "3px", background: t.inputBg, color: t.text }}
                       />
                     </td>
@@ -993,13 +1184,19 @@ function DataModelFormNew() {
                       />
                     </td>
                     <td style={{ padding: "8px", borderRight: `1px solid ${t.border}` }}>
-                      <input
-                        type="text"
-                        value={col.dataType}
+                      <select
+                        value={col.dataType || ""}
                         onChange={(e) => handleColumnChange(index, "dataType", e.target.value)}
-                        placeholder="Type (e.g. INT)"
                         style={{ width: "100%", padding: "4px", fontSize: "11px", border: `1px solid ${t.border}`, borderRadius: "3px", background: t.inputBg, color: t.text }}
-                      />
+                      >
+                        <option value="">Select Type</option>
+                        {standardDataTypes.map(type => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                        {col.dataType && !standardDataTypes.includes(col.dataType) && (
+                          <option value={col.dataType}>{col.dataType}</option>
+                        )}
+                      </select>
                     </td>
                     <td style={{ padding: "8px", borderRight: `1px solid ${t.border}`, textAlign: "center" }}>
                       <input

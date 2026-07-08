@@ -38,6 +38,23 @@ function Dashboard() {
     localStorage.setItem("tables", JSON.stringify(tables));
   }, [tables]);
 
+  useEffect(() => {
+    const handleStorage = () => {
+      const savedTables = localStorage.getItem("tables");
+      if (savedTables) {
+        const parsed = JSON.parse(savedTables);
+        setTables(prev => {
+          if (JSON.stringify(prev) === savedTables) {
+            return prev;
+          }
+          return parsed;
+        });
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
   return (
     <div style={{ padding: "40px" }}>
       <h2>Developers / Architects</h2>
