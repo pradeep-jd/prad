@@ -99,6 +99,40 @@ function DataModelFormNew() {
 
   const [pendingSubmissions, setPendingSubmissions] = useState([]);
   const [selectedSubmissionId, setSelectedSubmissionId] = useState("");
+  const [dbTables, setDbTables] = useState([]);
+
+  const loadDbTables = async () => {
+    try {
+      const res = await fetch("https://prad-proj1.onrender.com/schema");
+      if (res.ok) {
+        const data = await res.json();
+        // Extract unique table names and convert to lowercase
+        const names = [...new Set(data.map(row => row.table_name?.toLowerCase()))].filter(Boolean);
+        setDbTables(names);
+      }
+    } catch (err) {
+      console.error("Failed to load schema from database", err);
+    }
+  };
+
+  const checkTableExists = (tableName) => {
+    if (!tableName) return false;
+    const name = tableName.trim().toLowerCase();
+    
+    // Check database tables first
+    if (dbTables.includes(name)) return true;
+    
+    // Fallback to localStorage tables
+    const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
+    return approvedTables.some(t => {
+      const tName = t.tableName || t.name;
+      return tName && tName.trim().toLowerCase() === name;
+    });
+  };
+
+  useEffect(() => {
+    loadDbTables();
+  }, []);
 
   // Form states
   const [tableData, setTableData] = useState({
@@ -189,8 +223,12 @@ function DataModelFormNew() {
 
   useEffect(() => {
     refreshSubmissions();
-    window.addEventListener("storage", refreshSubmissions);
-    return () => window.removeEventListener("storage", refreshSubmissions);
+    const handleStorage = () => {
+      refreshSubmissions();
+      loadDbTables();
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   // Handle URL query parameter ?submissionId=sub_xxx
@@ -328,11 +366,7 @@ function DataModelFormNew() {
   // DDL generator
   useEffect(() => {
     if (tableData.tableName && columns.length > 0) {
-      const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
-      const isExisting = approvedTables.some(t => {
-        const name = t.tableName || t.name;
-        return name && name.trim().toLowerCase() === tableData.tableName.trim().toLowerCase();
-      });
+      const isExisting = checkTableExists(tableData.tableName);
 
       if (isExisting) {
         const addedCols = columns.filter(col => col.action === "Add" && col.columnName);
@@ -361,7 +395,7 @@ function DataModelFormNew() {
     } else {
       setSqlPreview("");
     }
-  }, [tableData.tableName, columns]);
+  }, [tableData.tableName, columns, dbTables]);
 
   const handleTableChange = (field, value) => {
     setTableData(prev => {
@@ -378,11 +412,7 @@ function DataModelFormNew() {
   };
 
   const handleAddColumn = () => {
-    const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
-    const isExisting = approvedTables.some(t => {
-      const name = t.tableName || t.name;
-      return name && name.trim().toLowerCase() === tableData.tableName.trim().toLowerCase();
-    });
+    const isExisting = checkTableExists(tableData.tableName);
 
     const newColumn = {
       attributeName: "",
@@ -401,11 +431,7 @@ function DataModelFormNew() {
   };
 
   const handleAddColumns = (count) => {
-    const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
-    const isExisting = approvedTables.some(t => {
-      const name = t.tableName || t.name;
-      return name && name.trim().toLowerCase() === tableData.tableName.trim().toLowerCase();
-    });
+    const isExisting = checkTableExists(tableData.tableName);
 
     const newColumns = Array(count).fill(null).map(() => ({
       attributeName: "",
@@ -601,11 +627,7 @@ function DataModelFormNew() {
       return;
     }
 
-    const approvedTables = JSON.parse(localStorage.getItem("tables") || "[]");
-    const isExisting = approvedTables.some(t => {
-      const name = t.tableName || t.name;
-      return name && name.trim().toLowerCase() === tableData.tableName.trim().toLowerCase();
-    });
+    const isExisting = checkTableExists(tableData.tableName);
 
     const template = [];
     if (!isExisting) {
@@ -685,6 +707,7 @@ function DataModelFormNew() {
       setSearchParams({});
       setSelectedSubmissionId("");
       showToast("Schema approved and applied to database!");
+      loadDbTables();
     } catch (err) {
       console.error(err);
       showToast("Failed to apply changes. Is backend running?", "error");
